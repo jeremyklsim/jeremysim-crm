@@ -10,7 +10,7 @@ var TODAY=iso(base);
 var addDays=function(n){var d=new Date(base);d.setDate(d.getDate()+n);return iso(d)};
 var daysBetween=function(a,b){return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/864e5)};
 var CURS={NZD:'NZ$',AUD:'A$',USD:'US$',THB:'\u0E3F'};
-var DEFAULT_SETTINGS=function(){return {base:'NZD',rates:{NZD:1,AUD:1.1,USD:1.7,THB:0.052}}};
+var DEFAULT_SETTINGS=function(){return {base:'NZD',rates:{NZD:1,AUD:1.1,USD:1.7,THB:0.052},services:{}}};
 var fmt=function(n,cur){return (CURS[cur]||'$')+Math.round(n||0).toLocaleString('en-US')};
 var toBase=function(n,cur){var r=(S.settings.rates[cur||'NZD'])||1,b=S.settings.rates[S.settings.base]||1;return (n||0)*r/b};
 var money=function(n){return fmt(n,S.settings.base)};
@@ -26,7 +26,15 @@ function dueInfo(s){
 
 var STAGES=[{id:'lead',name:'New lead',w:.1},{id:'contacted',name:'Contacted',w:.2},{id:'proposal',name:'Proposal sent',w:.4},{id:'negotiation',name:'Negotiating',w:.7},{id:'won',name:'Won',w:1},{id:'lost',name:'Lost',w:0}];
 var PHASES=[{id:'booked',name:'Booked'},{id:'prep',name:'Prep'},{id:'production',name:'Production'},{id:'post',name:'Post and build'},{id:'review',name:'Client review'},{id:'delivered',name:'Delivered'},{id:'paid',name:'Paid'}];
-var SERVICES={re:'Property photo',str:'Rental photo',video:'Video',ai:'AI consulting',brand:'Personal brand'};
+var BASE_SERVICES={re:'Property photo',str:'Rental photo',video:'Video',ai:'AI consulting',brand:'Personal brand'};
+var SERVICES=Object.assign({},BASE_SERVICES);
+var EXTRA_COLORS=['#B8860B','#C2410C','#0F766E','#4D7C0F','#BE185D','#4338CA','#7C3AED','#0369A1'];
+function refreshServices(){SERVICES=Object.assign({},BASE_SERVICES,(S&&S.settings&&S.settings.services)||{})}
+function fillSvcFilter(){
+  var el=$('#svc'),cur=el.value||'all';
+  el.innerHTML='<option value="all">All services</option>'+Object.keys(SERVICES).map(function(k){return '<option value="'+esc(k)+'">'+esc(SERVICES[k])+'</option>'}).join('');
+  el.value=SERVICES[cur]?cur:'all';
+}
 var BASE_TASKS={
   booked:['Send contract and deposit invoice','Confirm date and location'],
   prep:['Agree shot list or scope','Check gear and logistics'],
@@ -97,7 +105,7 @@ async function doSync(){
   }
   var sj=JSON.stringify(S.settings);
   if(sj!==snap.settings){
-    var sr=await sb.from('settings').upsert({user_id:session.user.id,base_currency:S.settings.base,rates:S.settings.rates},{onConflict:'user_id'});
+    var sr=await sb.from('settings').upsert({user_id:session.user.id,base_currency:S.settings.base,rates:S.settings.rates,services:S.settings.services||{}},{onConflict:'user_id'});
     if(sr.error)throw sr.error;
     snap.settings=sj;
   }
@@ -132,8 +140,9 @@ async function dbLoad(){
     clients:all[0].map(function(c){return {id:c.id,name:c.name,company:c.company,email:c.email,phone:c.phone,notes:c.notes}}),
     projects:all[1].map(function(p){return {id:p.id,clientId:p.client_id||'',title:p.title,service:p.service,value:Number(p.value),cur:p.currency,phase:p.phase,due:p.due||'',notes:p.notes,tasks:tasksBy[p.id]||[]}}),
     deals:all[2].map(function(d){return {id:d.id,clientId:d.client_id||'',projectId:d.project_id||'',title:d.title,service:d.service,value:Number(d.value),cur:d.currency,stage:d.stage,followUp:d.follow_up||'',wonDate:d.won_date||'',notes:d.notes}}),
-    settings:st.data?{base:st.data.base_currency,rates:Object.assign(DEFAULT_SETTINGS().rates,st.data.rates)}:DEFAULT_SETTINGS()
+    settings:st.data?{base:st.data.base_currency,rates:Object.assign(DEFAULT_SETTINGS().rates,st.data.rates),services:st.data.services||{}}:DEFAULT_SETTINGS()
   };
+  refreshServices();fillSvcFilter();
   var r=rowsFrom();
   snap={clients:{},projects:{},deals:{},tasks:{},settings:st.data?JSON.stringify(S.settings):''};
   ['clients','projects','deals','tasks'].forEach(function(t){Object.keys(r[t]).forEach(function(id){snap[t][id]=JSON.stringify(r[t][id])})});
@@ -158,7 +167,11 @@ function matches(item){
   }
   return true;
 }
-function tag(s){return '<span class="tag s-'+esc(s)+'"><i></i>'+esc(SERVICES[s]||s)+'</span>'}
+function tag(s){
+  if(BASE_SERVICES[s])return '<span class="tag s-'+esc(s)+'"><i></i>'+esc(SERVICES[s]||s)+'</span>';
+  var i=Object.keys((S.settings.services)||{}).indexOf(s);
+  return '<span class="tag"><i style="background:'+EXTRA_COLORS[(i<0?0:i)%EXTRA_COLORS.length]+';border-radius:2px"></i>'+esc(SERVICES[s]||s)+'</span>';
+}
 function opts(list,sel){return list.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===sel?' selected':'')+'>'+esc(o[1])+'</option>'}).join('')}
 function progress(p){var t=p.tasks.length,d=p.tasks.filter(function(x){return x.done}).length;return {d:d,t:t,pct:t?Math.round(d/t*100):0}}
 
@@ -315,8 +328,8 @@ function movePhase(id,phase){var p=rec('project',id);if(!p||p.phase===phase)retu
 function newRecord(k){
   var r;
   if(k==='client'){r={id:uid('c'),name:'New client',company:'',email:'',phone:'',notes:''};S.clients.push(r)}
-  else if(k==='project'){r={id:uid('p'),clientId:S.clients.length?S.clients[0].id:'',title:'New project',service:'re',value:0,cur:S.settings.base,phase:'booked',due:addDays(14),notes:'',tasks:mkTasks('re',0,0)};S.projects.push(r)}
-  else{r={id:uid('d'),clientId:S.clients.length?S.clients[0].id:'',title:'New deal',service:'re',value:0,cur:S.settings.base,stage:'lead',followUp:addDays(2),notes:''};S.deals.push(r)}
+  else if(k==='project'){r={id:uid('p'),clientId:'',title:'New project',service:'re',value:0,cur:S.settings.base,phase:'booked',due:addDays(14),notes:'',tasks:mkTasks('re',0,0)};S.projects.push(r)}
+  else{r={id:uid('d'),clientId:'',title:'New deal',service:'re',value:0,cur:S.settings.base,stage:'lead',followUp:addDays(2),notes:''};S.deals.push(r)}
   save();render();openDrawer(k,r.id,true);
 }
 function deleteRec(k,id){
@@ -329,7 +342,7 @@ function deleteRec(k,id){
 /* ---------- drawer ---------- */
 function openDrawer(k,id,isNew){
   if(dr.k===null)lastFocus=document.activeElement;
-  dr={k:k,id:id,confirm:false,fresh:true,isNew:!!isNew};
+  dr={k:k,id:id,confirm:false,fresh:true,isNew:!!isNew,adding:null};
   renderDrawer();
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   var f=isNew?$('#f-title')||$('#f-name'):$('#drawer .icon');
@@ -354,6 +367,11 @@ function renderSettings(){
    Object.keys(CURS).map(function(c){return fld('s-'+c,'1 '+c+' equals (in NZD)','<input id="s-'+c+'" type="number" min="0" step="0.001" data-rate="'+c+'" value="'+S.settings.rates[c]+'"'+(c==='NZD'?' disabled':'')+'>')}).join('')+
    '</div>';
 }
+function addForm(){
+  if(!dr.adding)return '';
+  var isC=dr.adding==='clientId';
+  return '<form class="inlineadd" data-add="'+dr.adding+'"><label class="lab" for="new-name">'+(isC?'New client name':'New service name')+'</label><div class="row2"><input id="new-name" required maxlength="80" placeholder="'+(isC?'e.g. Jane Smith':'e.g. Drone video')+'">'+(isC?'<input id="new-company" maxlength="80" placeholder="Company (optional)" aria-label="Company (optional)">':'')+'<button class="btn" type="submit">Add</button><button class="btn ghost" type="button" data-act="addcancel">Cancel</button></div></form>';
+}
 function renderDrawer(){
   if(dr.k==='settings'){renderSettings();return}
   var el=$('#drawer'),r=rec(dr.k,dr.id);
@@ -361,13 +379,15 @@ function renderDrawer(){
   var openSet=null,scroll=0,active=document.activeElement&&document.activeElement.id;
   if(!dr.fresh){openSet=new Set([].map.call(el.querySelectorAll('details[open]'),function(d){return d.dataset.ph}));var b=el.querySelector('.dr-body');scroll=b?b.scrollTop:0}
   var clientOpts=S.clients.map(function(c){return [c.id,c.name+(c.company?' ('+c.company+')':'')]});
-  if(!clientOpts.length)clientOpts=[['','No clients yet']];
+  if(!r.clientId)clientOpts.unshift(['','Choose a client\u2026']);
+  clientOpts.push(['__new__','+ Add new client\u2026']);
   var svcOpts=Object.keys(SERVICES).map(function(k){return [k,SERVICES[k]]});
+  svcOpts.push(['__new__','+ Add new service\u2026']);
   var head,body,foot='';
   if(dr.k==='deal'){
     head=['Deal',r.title];
     body=fld('f-title','Deal title','<input id="f-title" data-f="title" value="'+esc(r.title)+'">')+
-      '<div class="g2">'+fld('f-clientId','Client','<select id="f-clientId" data-f="clientId">'+opts(clientOpts,r.clientId)+'</select>')+fld('f-service','Service','<select id="f-service" data-f="service">'+opts(svcOpts,r.service)+'</select>')+'</div>'+
+      '<div class="g2">'+fld('f-clientId','Client','<select id="f-clientId" data-f="clientId">'+opts(clientOpts,r.clientId)+'</select>')+fld('f-service','Service','<select id="f-service" data-f="service">'+opts(svcOpts,r.service)+'</select>')+'</div>'+addForm()+
       '<div class="g2">'+fld('f-stage','Stage','<select id="f-stage" data-f="stage">'+opts(STAGES.map(function(s){return [s.id,s.name]}),r.stage)+'</select>')+valueField(r)+'</div>'+
       fld('f-followUp','Next follow-up','<input id="f-followUp" type="date" data-f="followUp" value="'+esc(r.followUp||'')+'">')+
       fld('f-notes','Notes','<textarea id="f-notes" data-f="notes">'+esc(r.notes)+'</textarea>');
@@ -377,7 +397,7 @@ function renderDrawer(){
     var pr=progress(r),idx=PHASES.map(function(p){return p.id}).indexOf(r.phase);
     head=['Project',r.title];
     body=fld('f-title','Project title','<input id="f-title" data-f="title" value="'+esc(r.title)+'">')+
-      '<div class="g2">'+fld('f-clientId','Client','<select id="f-clientId" data-f="clientId">'+opts(clientOpts,r.clientId)+'</select>')+fld('f-service','Service','<select id="f-service" data-f="service">'+opts(svcOpts,r.service)+'</select>')+'</div>'+
+      '<div class="g2">'+fld('f-clientId','Client','<select id="f-clientId" data-f="clientId">'+opts(clientOpts,r.clientId)+'</select>')+fld('f-service','Service','<select id="f-service" data-f="service">'+opts(svcOpts,r.service)+'</select>')+'</div>'+addForm()+
       '<div class="g2">'+fld('f-due','Due date','<input id="f-due" type="date" data-f="due" value="'+esc(r.due||'')+'">')+valueField(r)+'</div>'+
       '<div><p class="lab" id="phlab">Phase</p><ol class="steps" aria-labelledby="phlab">'+PHASES.map(function(p,i){return '<li><button data-act="setphase" data-v="'+p.id+'" aria-pressed="'+(p.id===r.phase)+'" class="'+(i<idx?'passed':'')+'">'+esc(p.name)+'</button></li>'}).join('')+'</ol></div>'+
       '<div><p class="lab">Progress: '+pr.d+' of '+pr.t+' tasks done</p><div class="prog" aria-hidden="true"><i style="width:'+pr.pct+'%"></i></div></div>'+
@@ -420,6 +440,7 @@ document.addEventListener('click',function(e){
     else openDrawer(t.dataset.k,t.dataset.id);
   }
   else if(a==='new')newRecord(ui.view==='projects'?'project':ui.view==='clients'?'client':'deal');
+  else if(a==='addcancel'){dr.adding=null;renderDrawer()}
   else if(a==='settings'){if(dr.k===null)openDrawer('settings','x')}
   else if(a==='signout'){signOut()}
   else if(a==='setphase'){movePhase(dr.id,t.dataset.v);renderDrawer();render()}
@@ -439,6 +460,7 @@ document.addEventListener('change',function(e){
     save();render();return;
   }
   if(dr.k===null)return;
+  if(t.dataset.f&&t.value==='__new__'){dr.adding=t.dataset.f;renderDrawer();var nn=document.getElementById('new-name');if(nn)nn.focus();return}
   if(t.dataset.task){
     var p=rec('project',dr.id),task=p.tasks.filter(function(x){return x.id===t.dataset.task})[0];
     task.done=t.checked;save();
@@ -459,6 +481,27 @@ document.addEventListener('change',function(e){
   render();
 });
 document.addEventListener('submit',function(e){
+  var af=e.target.closest('.inlineadd');
+  if(af){
+    e.preventDefault();
+    var nm=$('#new-name').value.trim();if(!nm)return;
+    var r2=rec(dr.k,dr.id);
+    if(af.dataset.add==='clientId'){
+      var c={id:uid('c'),name:nm,company:($('#new-company')?$('#new-company').value.trim():''),email:'',phone:'',notes:''};
+      S.clients.push(c);r2.clientId=c.id;
+    }else{
+      var key=nm.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'service',base=key,n=2;
+      while(SERVICES[key]){
+        if(SERVICES[key].toLowerCase()===nm.toLowerCase())break;
+        key=base+'-'+(n++);
+      }
+      if(!SERVICES[key]){S.settings.services=Object.assign({},S.settings.services,{[key]:nm});refreshServices();fillSvcFilter()}
+      r2.service=key;
+      if(dr.k==='project'&&!r2.tasks.some(function(x){return x.done}))r2.tasks=mkTasks(key,PHASES.map(function(p){return p.id}).indexOf(r2.phase),0);
+    }
+    dr.adding=null;save();renderDrawer();render();
+    return;
+  }
   var f=e.target.closest('.addtask');if(!f)return;
   e.preventDefault();
   var inp=f.querySelector('input'),text=inp.value.trim();if(!text)return;
@@ -600,7 +643,7 @@ $('#newpwform').addEventListener('submit',async function(e){
   $('#np-pass').value='';
   var g=await sb.auth.getSession();enter(g.data.session);
 });
-$('#svc').innerHTML='<option value="all">All services</option>'+Object.keys(SERVICES).map(function(k){return '<option value="'+k+'">'+esc(SERVICES[k])+'</option>'}).join('');
+fillSvcFilter();
 window.addEventListener('hashchange',function(){var n=(location.hash||'').replace('#','');if(session&&VIEWS.indexOf(n)>=0&&n!==ui.view){ui.view=n;render()}});
 (async function boot(){
   if(!window.supabase||!window.CONFIG){$('#loading').textContent='App failed to load. Refresh the page.';return}

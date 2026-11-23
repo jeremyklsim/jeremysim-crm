@@ -204,3 +204,7 @@ details.ph.cur{border-color:var(--accent)}
 .firstrun{background:var(--accent-soft);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .firstrun h2{font-size:16px;margin-bottom:4px}
 .firstrun p{margin:0;color:var(--muted)}
+
+.inlineadd{background:var(--accent-soft);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.inlineadd .row2{display:flex;flex-wrap:wrap;gap:6px}
+.inlineadd input{flex:1 1 150px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:38px}
