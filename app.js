@@ -69,7 +69,7 @@ function setSaveState(t,bad){var e=$('#savestate');if(e){e.textContent=t;e.class
 function rowsFrom(){
   var r={clients:{},projects:{},deals:{},tasks:{}};
   var cids={},pids={};
-  S.clients.forEach(function(c){cids[c.id]=1;r.clients[c.id]={id:c.id,name:c.name||'Unnamed',company:c.company||'',email:c.email||'',phone:c.phone||'',notes:c.notes||''}});
+  S.clients.forEach(function(c){cids[c.id]=1;r.clients[c.id]={id:c.id,name:c.name||'Unnamed',company:c.company||'',email:c.email||'',phone:c.phone||'',notes:c.notes||'',sold_value:Math.max(0,Number(c.soldValue)||0),sold_jobs:Math.max(0,Math.round(Number(c.soldJobs)||0)),sold_currency:c.soldCur||'NZD',follow_up:c.followUp||null}});
   S.projects.forEach(function(p){
     pids[p.id]=1;
     r.projects[p.id]={id:p.id,client_id:cids[p.clientId]?p.clientId:null,title:p.title||'Untitled',service:p.service,value:Number(p.value)||0,currency:p.cur,phase:p.phase,due:p.due||null,notes:p.notes||''};
@@ -137,7 +137,7 @@ async function dbLoad(){
   var tasksBy={};
   all[3].sort(function(a,b){return a.position-b.position}).forEach(function(t){(tasksBy[t.project_id]=tasksBy[t.project_id]||[]).push({id:t.id,phase:t.phase,text:t.text,done:t.done})});
   S={
-    clients:all[0].map(function(c){return {id:c.id,name:c.name,company:c.company,email:c.email,phone:c.phone,notes:c.notes}}),
+    clients:all[0].map(function(c){return {id:c.id,name:c.name,company:c.company,email:c.email,phone:c.phone,notes:c.notes,soldValue:Number(c.sold_value)||0,soldJobs:c.sold_jobs||0,soldCur:c.sold_currency||'NZD',followUp:c.follow_up||''}}),
     projects:all[1].map(function(p){return {id:p.id,clientId:p.client_id||'',title:p.title,service:p.service,value:Number(p.value),cur:p.currency,phase:p.phase,due:p.due||'',notes:p.notes,tasks:tasksBy[p.id]||[]}}),
     deals:all[2].map(function(d){return {id:d.id,clientId:d.client_id||'',projectId:d.project_id||'',title:d.title,service:d.service,value:Number(d.value),cur:d.currency,stage:d.stage,followUp:d.follow_up||'',wonDate:d.won_date||'',notes:d.notes}}),
     settings:st.data?{base:st.data.base_currency,rates:Object.assign(DEFAULT_SETTINGS().rates,st.data.rates),services:st.data.services||{}}:DEFAULT_SETTINGS()
@@ -148,7 +148,7 @@ async function dbLoad(){
   ['clients','projects','deals','tasks'].forEach(function(t){Object.keys(r[t]).forEach(function(id){snap[t][id]=JSON.stringify(r[t][id])})});
 }
 
-var ui={view:'dashboard',q:'',svc:'all'};
+var ui={view:'dashboard',q:'',svc:'all',sort:'sold',dir:-1};
 var drag=null;
 var dr={k:null,id:null,confirm:false,fresh:false};
 var lastFocus=null;
@@ -166,6 +166,14 @@ function matches(item){
     if(hay.indexOf(ui.q.toLowerCase())<0)return false;
   }
   return true;
+}
+function mkClient(o){return Object.assign({id:uid('c'),name:'',company:'',email:'',phone:'',notes:'',soldValue:0,soldJobs:0,soldCur:S.settings.base,followUp:''},o||{})}
+function clientStats(c){
+  var ps=S.projects.filter(function(p){return p.clientId===c.id});
+  var paid=ps.filter(function(p){return p.phase==='paid'}),open=ps.filter(function(p){return p.phase!=='paid'});
+  var sum=function(l){return l.reduce(function(a,p){return a+toBase(p.value,p.cur)},0)};
+  return {jobs:(c.soldJobs||0)+paid.length,sold:toBase(c.soldValue,c.soldCur)+sum(paid),booked:sum(open),
+    openDeals:S.deals.filter(function(d){return d.clientId===c.id&&d.stage!=='won'&&d.stage!=='lost'}).length,projects:ps.length};
 }
 function tag(s){
   if(BASE_SERVICES[s])return '<span class="tag s-'+esc(s)+'"><i></i>'+esc(SERVICES[s]||s)+'</span>';
@@ -193,6 +201,13 @@ function attention(){
     if(n<0)items.push({k:'deal',id:d.id,why:'Overdue',cls:'late',text:'Follow up with '+cname(d.clientId),sub:d.title+' · '+Math.abs(n)+' days late',o:n});
     else if(n===0)items.push({k:'deal',id:d.id,why:'Today',cls:'soon',text:'Follow up with '+cname(d.clientId),sub:d.title,o:0});
   });
+  S.clients.forEach(function(c){
+    if(!c.followUp)return;
+    var n=daysBetween(TODAY,c.followUp);
+    if(n>0)return;
+    var st=clientStats(c);
+    items.push({k:'client',id:c.id,why:n<0?'Overdue':'Today',cls:n<0?'late':'soon',text:'Check in with '+c.name,sub:money(st.sold)+' sold, '+st.jobs+' job'+(st.jobs===1?'':'s')+(n<0?' \u00B7 '+Math.abs(n)+' days late':''),o:n});
+  });
   S.projects.forEach(function(p){
     if(p.phase==='paid')return;
     if(p.phase==='delivered')items.push({k:'project',id:p.id,why:'Unpaid',cls:'money',text:'Chase payment from '+cname(p.clientId),sub:p.title+' · '+fmt(p.value,p.cur),o:5});
@@ -206,7 +221,7 @@ function attention(){
 }
 function bars(rows,fmt){
   var max=Math.max.apply(null,rows.map(function(r){return r.v}).concat([1]));
-  return rows.map(function(r){return '<div class="bar-row"><span>'+esc(r.l)+'</span><div class="bar" aria-hidden="true"><i style="width:'+(r.v/max*100)+'%"></i></div><b class="num">'+esc(fmt(r.v))+'</b></div>'}).join('');
+  return rows.map(function(r){return '<div class="bar-row"><span title="'+esc(r.l)+'">'+esc(r.l)+'</span><div class="bar" aria-hidden="true"><i style="width:'+(r.v/max*100)+'%"></i></div><b class="num">'+esc(fmt(r.v))+'</b></div>'}).join('');
 }
 function renderDashboard(){
   var open=S.deals.filter(function(d){return d.stage!=='won'&&d.stage!=='lost'});
@@ -222,21 +237,26 @@ function renderDashboard(){
   var stageRows=STAGES.filter(function(s){return s.id!=='won'&&s.id!=='lost'}).map(function(s){return {l:s.name,v:S.deals.filter(function(d){return d.stage===s.id}).reduce(function(a,d){return a+toBase(d.value,d.cur)},0)}});
   var phaseRows=PHASES.map(function(p){return {l:p.name,v:S.projects.filter(function(x){return x.phase===p.id}).length}});
   var svcRows=Object.keys(SERVICES).map(function(k){return {l:SERVICES[k],v:S.projects.filter(function(p){return p.service===k}).reduce(function(a,p){return a+toBase(p.value,p.cur)},0)}});
+  var cs=S.clients.map(function(c){return {c:c,s:clientStats(c)}});
+  var soldTotal=cs.reduce(function(a,x){return a+x.s.sold},0),jobsTotal=cs.reduce(function(a,x){return a+x.s.jobs},0),repeat=cs.filter(function(x){return x.s.jobs>=2}).length;
+  var topRows=cs.filter(function(x){return x.s.sold>0}).sort(function(a,b){return b.s.sold-a.s.sold}).slice(0,8).map(function(x){return {l:x.c.name,v:x.s.sold}});
   var at=attention();
   var first=(!S.clients.length&&!S.deals.length&&!S.projects.length)?'<div class="firstrun"><h2>Your CRM is empty</h2><p>Start with Clients, then Import CSV to bring in your contacts, or press New deal to add your first lead.</p></div>':'';
   return first+'<div class="kpis">'+
+   tile('Sold to date',money(soldTotal),jobsTotal+' jobs \u00B7 '+repeat+' repeat client'+(repeat===1?'':'s'))+
    tile('Open pipeline',money(openVal),open.length+' deals · '+money(weighted)+' weighted')+
    tile('Won this month',money(wonVal),won.length+' deal'+(won.length===1?'':'s'))+
    tile('Active projects',String(active.length),dueWeek+' due in the next 7 days')+
    tile('Awaiting payment',money(unpaidVal),unpaid.length+' delivered, unpaid')+
   '</div>'+
   '<div class="two">'+
-   '<section class="panel"><h2>Needs attention</h2>'+(at.length?'<ul class="attn">'+at.slice(0,7).map(function(a){return '<li><button data-act="open" data-k="'+a.k+'" data-id="'+esc(a.id)+'"><span class="why '+a.cls+'">'+esc(a.why)+'</span><span>'+esc(a.text)+'<small>'+esc(a.sub)+'</small></span></button></li>'}).join('')+'</ul>':'<p class="empty">Nothing is on fire. Suspicious, but nice.</p>')+'</section>'+
+   '<section class="panel"><h2>Needs attention</h2>'+(at.length?'<ul class="attn">'+at.slice(0,8).map(function(a){return '<li><button data-act="open" data-k="'+a.k+'" data-id="'+esc(a.id)+'"><span class="why '+a.cls+'">'+esc(a.why)+'</span><span>'+esc(a.text)+'<small>'+esc(a.sub)+'</small></span></button></li>'}).join('')+'</ul>'+(at.length>8?'<p class="hintline" style="margin-top:8px">+ '+(at.length-8)+' more. Sort Clients by follow-up to see them all.</p>':''):'<p class="empty">Nothing is on fire. Suspicious, but nice.</p>')+'</section>'+
    '<section class="panel"><h2>Pipeline value by stage</h2>'+bars(stageRows,money)+'<p class="hintline">Totals convert to '+S.settings.base+' using the rates under Currency rates. Weighted forecast uses 10%, 20%, 40% and 70% by stage.</p></section>'+
   '</div>'+
   '<div class="two">'+
    '<section class="panel"><h2>Projects by phase</h2>'+bars(phaseRows,function(v){return String(v)})+'</section>'+
    '<section class="panel"><h2>Project value by service</h2>'+bars(svcRows,money)+'</section>'+
+   '<section class="panel"><h2>Top clients by sold value</h2>'+(topRows.length?bars(topRows,money):'<p class="empty">Import your Xero customer list on the Clients page to see your best clients here.</p>')+'</section>'+
   '</div>';
 }
 function tile(l,big,hint){return '<div class="tile"><div class="lbl">'+esc(l)+'</div><div class="big num">'+esc(big)+'</div><div class="hint">'+esc(hint)+'</div></div>'}
@@ -275,15 +295,20 @@ function renderProjects(){
   return boardHtml(PHASES,items,projectCard,'phase',null);
 }
 function renderClients(){
-  var list=S.clients.filter(matches);
-  var note='<p class="toolbar-note">Import CSV columns: name (or first name and last name), company, email, phone, notes. Contacts with an email already in the list are skipped.</p>';
+  var note='<p class="toolbar-note">Sold value is past work from Xero plus paid projects here. Booked value is projects not yet paid. Import CSV columns: name, email, company, phone, notes, jobs, total revenue, follow-up date.</p>';
+  var list=S.clients.filter(matches).map(function(c){return {c:c,s:clientStats(c)}});
   if(!list.length)return note+'<p class="empty">No clients yet. Add one, or use Import CSV.</p>';
-  return note+'<div class="tbl-wrap"><table><thead><tr><th>Client</th><th>Email</th><th class="r">Open deals</th><th class="r">Projects</th><th class="r">Booked value ('+S.settings.base+')</th></tr></thead><tbody>'+
-   list.map(function(c){
-     var od=S.deals.filter(function(d){return d.clientId===c.id&&d.stage!=='won'&&d.stage!=='lost'}).length;
-     var ps=S.projects.filter(function(p){return p.clientId===c.id});
-     return '<tr><td><button class="rowbtn" data-act="open" data-k="client" data-id="'+esc(c.id)+'">'+esc(c.name)+'</button><div class="c" style="color:var(--muted);font-size:12.5px">'+esc(c.company)+'</div></td><td>'+esc(c.email)+'</td><td class="r num">'+od+'</td><td class="r num">'+ps.length+'</td><td class="r num">'+money(ps.reduce(function(a,p){return a+toBase(p.value,p.cur)},0))+'</td></tr>';
-   }).join('')+'</tbody></table></div>';
+  var key=ui.sort,dir=ui.dir;
+  var val=function(x){return key==='name'?x.c.name.toLowerCase():key==='jobs'?x.s.jobs:key==='booked'?x.s.booked:key==='follow'?(x.c.followUp||'9999-99-99'):x.s.sold};
+  list.sort(function(a,b){var A=val(a),B=val(b);return ((A<B?-1:A>B?1:0)*dir)||a.c.name.localeCompare(b.c.name)});
+  var th=function(k,label,cls){return '<th class="'+cls+'" aria-sort="'+(key===k?(dir>0?'ascending':'descending'):'none')+'"><button class="thbtn" data-act="sort" data-v="'+k+'">'+label+(key===k?(dir>0?' ▲':' ▼'):'')+'</button></th>'};
+  var tj=0,ts=0,tb=0;
+  var rows=list.map(function(x){
+    var c=x.c,st=x.s;tj+=st.jobs;ts+=st.sold;tb+=st.booked;
+    var fu=c.followUp?dueInfo(c.followUp):null;
+    return '<tr><td><button class="rowbtn" data-act="open" data-k="client" data-id="'+esc(c.id)+'">'+esc(c.name)+'</button>'+(st.jobs>=2?' <span class="chip">Repeat</span>':'')+(c.company?'<div class="c" style="color:var(--muted);font-size:12.5px">'+esc(c.company)+'</div>':'')+'</td><td>'+esc(c.email)+'</td><td class="r num">'+st.jobs+'</td><td class="r num">'+money(st.sold)+'</td><td class="r num">'+money(st.booked)+'</td><td class="r num">'+st.openDeals+'</td><td>'+(fu?'<span class="chip '+fu.cls+'">'+esc(fu.text)+'</span>':'<span style="color:var(--muted)">None</span>')+'</td></tr>';
+  }).join('');
+  return note+'<div class="tbl-wrap"><table><thead><tr>'+th('name','Client','')+'<th>Email</th>'+th('jobs','Jobs','r')+th('sold','Sold value ('+S.settings.base+')','r')+th('booked','Booked value','r')+'<th class="r">Open deals</th>'+th('follow','Follow-up','')+'</tr></thead><tbody>'+rows+'</tbody><tfoot><tr><td colspan="2">'+list.length+' client'+(list.length===1?'':'s')+'</td><td class="r num">'+tj+'</td><td class="r num">'+money(ts)+'</td><td class="r num">'+money(tb)+'</td><td colspan="2"></td></tr></tfoot></table></div>';
 }
 
 function render(){
@@ -327,7 +352,7 @@ function moveDeal(id,stage){
 function movePhase(id,phase){var p=rec('project',id);if(!p||p.phase===phase)return;p.phase=phase;save()}
 function newRecord(k){
   var r;
-  if(k==='client'){r={id:uid('c'),name:'New client',company:'',email:'',phone:'',notes:''};S.clients.push(r)}
+  if(k==='client'){r=mkClient({name:'New client'});S.clients.push(r)}
   else if(k==='project'){r={id:uid('p'),clientId:'',title:'New project',service:'re',value:0,cur:S.settings.base,phase:'booked',due:addDays(14),notes:'',tasks:mkTasks('re',0,0)};S.projects.push(r)}
   else{r={id:uid('d'),clientId:'',title:'New deal',service:'re',value:0,cur:S.settings.base,stage:'lead',followUp:addDays(2),notes:''};S.deals.push(r)}
   save();render();openDrawer(k,r.id,true);
@@ -412,10 +437,16 @@ function renderDrawer(){
     if(r.clientId)body+='<div><p class="lab">Client</p><ul class="linklist"><li><button data-act="open" data-k="client" data-id="'+esc(r.clientId)+'">'+esc(cname(r.clientId))+'</button></li></ul></div>';
   }else{
     head=['Client',r.name];
+    var cst=clientStats(r);
     var ds=S.deals.filter(function(d){return d.clientId===r.id}),ps=S.projects.filter(function(p){return p.clientId===r.id});
     body=fld('f-name','Name','<input id="f-name" data-f="name" value="'+esc(r.name)+'">')+
       fld('f-company','Company','<input id="f-company" data-f="company" value="'+esc(r.company)+'">')+
       '<div class="g2">'+fld('f-email','Email','<input id="f-email" type="email" data-f="email" value="'+esc(r.email)+'">')+fld('f-phone','Phone','<input id="f-phone" type="tel" data-f="phone" value="'+esc(r.phone)+'">')+'</div>'+
+      '<div class="stats">'+[['Jobs',String(cst.jobs)],['Sold value',money(cst.sold)],['Booked now',money(cst.booked)]].map(function(p){return '<div class="stat"><span>'+p[0]+'</span><b class="num">'+esc(p[1])+'</b></div>'}).join('')+'</div>'+
+      '<div class="g2">'+fld('f-soldJobs','Past jobs (from Xero)','<input id="f-soldJobs" type="number" min="0" step="1" data-f="soldJobs" value="'+esc(r.soldJobs||0)+'">')+
+      fld('f-soldValue','Past revenue (from Xero)','<div class="valrow"><input id="f-soldValue" type="number" min="0" step="0.01" data-f="soldValue" value="'+esc(r.soldValue||0)+'"><select id="f-soldCur" data-f="soldCur" aria-label="Currency">'+opts(Object.keys(CURS).map(function(c){return [c,c]}),r.soldCur||'NZD')+'</select></div>')+'</div>'+
+      fld('f-followUp','Next follow-up','<input id="f-followUp" type="date" data-f="followUp" value="'+esc(r.followUp||'')+'">')+
+      '<div class="dr-foot"><button class="btn ghost" data-act="snooze" data-d="7">In 1 week</button><button class="btn ghost" data-act="snooze" data-d="30">In 1 month</button><button class="btn ghost" data-act="snooze" data-d="0">Clear</button></div>'+
       fld('f-notes','Notes','<textarea id="f-notes" data-f="notes">'+esc(r.notes)+'</textarea>')+
       '<div><p class="lab">Deals</p>'+(ds.length?'<ul class="linklist">'+ds.map(function(d){return '<li><button data-act="open" data-k="deal" data-id="'+esc(d.id)+'"><span>'+esc(d.title)+'</span><span class="chip push">'+esc(byId(STAGES,d.stage).name)+'</span></button></li>'}).join('')+'</ul>':'<p class="hintline">No deals yet.</p>')+'</div>'+
       '<div><p class="lab">Projects</p>'+(ps.length?'<ul class="linklist">'+ps.map(function(p){return '<li><button data-act="open" data-k="project" data-id="'+esc(p.id)+'"><span>'+esc(p.title)+'</span><span class="chip push">'+esc(byId(PHASES,p.phase).name)+'</span></button></li>'}).join('')+'</ul>':'<p class="hintline">No projects yet.</p>')+'</div>';
@@ -440,6 +471,8 @@ document.addEventListener('click',function(e){
     else openDrawer(t.dataset.k,t.dataset.id);
   }
   else if(a==='new')newRecord(ui.view==='projects'?'project':ui.view==='clients'?'client':'deal');
+  else if(a==='sort'){var k2=t.dataset.v;if(ui.sort===k2)ui.dir=-ui.dir;else{ui.sort=k2;ui.dir=(k2==='name'||k2==='follow')?1:-1}render()}
+  else if(a==='snooze'){var cr=rec('client',dr.id);cr.followUp=t.dataset.d==='0'?'':addDays(Number(t.dataset.d));save();renderDrawer();render()}
   else if(a==='addcancel'){dr.adding=null;renderDrawer()}
   else if(a==='settings'){if(dr.k===null)openDrawer('settings','x')}
   else if(a==='signout'){signOut()}
@@ -473,6 +506,8 @@ document.addEventListener('change',function(e){
   }
   var f=t.dataset.f;if(!f)return;
   var r=rec(dr.k,dr.id),v=t.type==='number'?(Number(t.value)||0):t.value;
+  if(f==='value'||f==='soldValue')v=Math.max(0,v);
+  if(f==='soldJobs')v=Math.max(0,Math.round(v));
   if(dr.k==='deal'&&f==='stage'){moveDeal(dr.id,v)}
   else{r[f]=v;if(dr.k==='project'&&f==='service'&&!r.tasks.some(function(x){return x.done})){r.tasks=mkTasks(v,PHASES.map(function(p){return p.id}).indexOf(r.phase),0)}}
   save();
@@ -487,7 +522,7 @@ document.addEventListener('submit',function(e){
     var nm=$('#new-name').value.trim();if(!nm)return;
     var r2=rec(dr.k,dr.id);
     if(af.dataset.add==='clientId'){
-      var c={id:uid('c'),name:nm,company:($('#new-company')?$('#new-company').value.trim():''),email:'',phone:'',notes:''};
+      var c=mkClient({name:nm,company:($('#new-company')?$('#new-company').value.trim():'')});
       S.clients.push(c);r2.clientId=c.id;
     }else{
       var key=nm.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'service',base=key,n=2;
@@ -534,28 +569,51 @@ function parseCSV(text){
   if(row.some(function(x){return x.trim()!==''}))rows.push(row);
   return rows;
 }
-var HMAP={name:['name','fullname','contact','contactname'],first:['firstname','first','givenname'],last:['lastname','last','surname','familyname'],company:['company','companyname','organization','organisation','business'],email:['email','emailaddress','mail'],phone:['phone','phonenumber','mobile','mobilephone','tel','telephone'],notes:['notes','note','comments','comment']};
+var HMAP={name:['name','fullname','contact','contactname','client','clientname','customer','customername'],first:['firstname','first','givenname'],last:['lastname','last','surname','familyname'],company:['company','companyname','organization','organisation','business'],email:['email','emailaddress','mail'],phone:['phone','phonenumber','mobile','mobilephone','tel','telephone'],notes:['notes','note','comments','comment'],jobs:['jobs','jobcount','numberofjobs','numjobs'],follow:['followupdate','followup','nextfollowup','nextfollowupdate']};
+function parseMoney(v){var n=Number(String(v==null?'':v).replace(/[^0-9.\-]/g,''));return isFinite(n)?n:0}
+function parseDate(v){
+  v=String(v||'').trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v))return v;
+  var m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m){var d=Number(m[1]),mo=Number(m[2]);if(d>=1&&d<=31&&mo>=1&&mo<=12)return m[3]+'-'+pad(mo)+'-'+pad(d)}
+  return '';
+}
 function importCSV(text){
   var rows=parseCSV(text);
   if(rows.length<2){toast('That file has no contact rows. The first row must be column headings.');return}
   var heads=rows[0].map(function(h){return h.toLowerCase().replace(/[^a-z0-9]/g,'')});
   var col={};
   Object.keys(HMAP).forEach(function(k){for(var j=0;j<heads.length;j++){if(HMAP[k].indexOf(heads[j])>=0){col[k]=j;break}}});
+  for(var j2=0;j2<heads.length;j2++){if(/^(totalrevenue|revenue|totalsold|soldvalue)/.test(heads[j2])){col.revenue=j2;break}}
   if(col.name===undefined&&col.first===undefined&&col.email===undefined){toast('No name or email column found. Check the column headings.');return}
+  var cm=col.revenue!==undefined?String(rows[0][col.revenue]).match(/\b(NZD|AUD|USD|THB)\b/i):null;
+  var revCur=cm?cm[1].toUpperCase():S.settings.base;
   var get=function(r,k){return col[k]===undefined?'':String(r[col[k]]||'').trim()};
-  var seen={};S.clients.forEach(function(c){if(c.email)seen[c.email.toLowerCase()]=1});
-  var added=0,dupes=0,bad=0;
+  var existing={};S.clients.forEach(function(c){if(c.email)existing[c.email.toLowerCase()]=c});
+  var hasSold=col.jobs!==undefined||col.revenue!==undefined||col.follow!==undefined;
+  var added=0,updated=0,dupes=0,bad=0;
   rows.slice(1).forEach(function(r){
     var name=get(r,'name')||(get(r,'first')+' '+get(r,'last')).trim(),email=get(r,'email');
     if(!name)name=email;
     if(!name){bad++;return}
-    if(email&&seen[email.toLowerCase()]){dupes++;return}
-    if(email)seen[email.toLowerCase()]=1;
-    S.clients.push({id:uid('c'),name:name,company:get(r,'company'),email:email,phone:get(r,'phone'),notes:get(r,'notes')});
+    var jobs=Math.max(0,Math.round(parseMoney(get(r,'jobs')))),rev=Math.max(0,parseMoney(get(r,'revenue'))),fu=parseDate(get(r,'follow'));
+    var notes=get(r,'notes');if(/^Xero top \d+ #\d+:/i.test(notes))notes='';
+    var ex=email?existing[email.toLowerCase()]:null;
+    if(ex){
+      if(hasSold){
+        if(col.jobs!==undefined)ex.soldJobs=jobs;
+        if(col.revenue!==undefined){ex.soldValue=rev;ex.soldCur=revCur}
+        if(fu)ex.followUp=fu;
+        updated++;
+      }else dupes++;
+      return;
+    }
+    var c=mkClient({name:name,company:get(r,'company'),email:email,phone:get(r,'phone'),notes:notes,soldJobs:jobs,soldValue:rev,soldCur:revCur,followUp:fu});
+    S.clients.push(c);if(email)existing[email.toLowerCase()]=c;
     added++;
   });
   save();render();
-  toast('Imported '+added+' contact'+(added===1?'':'s')+(dupes?', skipped '+dupes+' duplicate'+(dupes===1?'':'s'):'')+(bad?', '+bad+' row'+(bad===1?'':'s')+' had no name or email':'')+'.');
+  toast('Imported '+added+' new client'+(added===1?'':'s')+(updated?', updated '+updated+' existing':'')+(dupes?', skipped '+dupes+' duplicate'+(dupes===1?'':'s'):'')+(bad?', '+bad+' row'+(bad===1?'':'s')+' had no name or email':'')+'.');
 }
 $('#importbtn').addEventListener('click',function(){$('#csvfile').click()});
 $('#csvfile').addEventListener('change',function(e){
