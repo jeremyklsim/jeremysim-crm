@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Jeremysim.co Studio CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="loading" class="loading" role="status">Loading…</div>
+<main id="auth" class="auth" hidden>
+  <div class="authcard">
+    <p class="authbrand">Jeremysim.co</p>
+    <h1>Studio CRM</h1>
+    <form id="loginform" hidden>
+      <div class="fld"><label for="au-email">Email</label><input id="au-email" type="email" autocomplete="username" required></div>
+      <div class="fld"><label for="au-pass">Password</label><input id="au-pass" type="password" autocomplete="current-password" required></div>
+      <button class="btn" id="loginbtn" type="submit">Sign in</button>
+      <button class="linkbtn" id="forgotbtn" type="button">Forgot password?</button>
+    </form>
+    <form id="resetform" hidden>
+      <p class="hintline">Enter your email and I will send a reset link.</p>
+      <div class="fld"><label for="re-email">Email</label><input id="re-email" type="email" autocomplete="username" required></div>
+      <button class="btn" type="submit">Send reset link</button>
+      <button class="linkbtn" id="backbtn" type="button">Back to sign in</button>
+    </form>
+    <form id="newpwform" hidden>
+      <p class="hintline">Choose a new password, at least 10 characters.</p>
+      <div class="fld"><label for="np-pass">New password</label><input id="np-pass" type="password" autocomplete="new-password" minlength="10" required></div>
+      <button class="btn" type="submit">Save password</button>
+    </form>
+    <p id="authmsg" class="authmsg" role="alert"></p>
+  </div>
+</main>
+<div class="app" hidden>
+  <aside class="side">
+    <div class="brand">Jeremysim.co<small>Studio CRM prototype</small></div>
+    <nav class="nav" aria-label="Main">
+      <button data-act="nav" data-v="dashboard"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="7" rx="1.2"/><rect x="11.5" y="2.5" width="6" height="4" rx="1.2"/><rect x="2.5" y="12.5" width="6" height="5" rx="1.2"/><rect x="11.5" y="9.5" width="6" height="8" rx="1.2"/></svg>Dashboard</button>
+      <button data-act="nav" data-v="pipeline"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2.5 4h15l-5.5 6.5V16l-4-2v-3.5z"/></svg>Sales pipeline</button>
+      <button data-act="nav" data-v="projects"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="3" width="4.5" height="14" rx="1.2"/><rect x="8" y="3" width="4.5" height="9" rx="1.2"/><rect x="13.5" y="3" width="4" height="6" rx="1.2"/></svg>Projects</button>
+      <button data-act="nav" data-v="clients"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.2 3.3-4.8 6.5-4.8s5.7 1.6 6.5 4.8"/></svg>Clients</button>
+    </nav>
+    <div class="side-foot">
+      <p id="savestate" style="margin:0" role="status">All changes saved</p>
+      <button data-act="settings">Currency rates</button> <button data-act="signout">Sign out</button>
+    </div>
+  </aside>
+  <main>
+    <header class="top">
+      <h1 id="pagetitle"></h1>
+      <div class="field-inline" id="filters">
+        <label class="sr" for="q" style="position:absolute;left:-9999px">Search</label>
+        <input type="search" id="q" placeholder="Search name, client, project">
+        <label for="svc" style="position:absolute;left:-9999px">Filter by service</label>
+        <select id="svc"></select>
+      </div>
+      <button class="btn ghost" id="importbtn" type="button" style="display:none">Import CSV</button>
+      <input type="file" id="csvfile" accept=".csv,text/csv" hidden aria-label="Choose a CSV file of contacts">
+      <button class="btn" id="newbtn" data-act="new"></button>
+    </header>
+    <section id="view" aria-live="polite"></section>
+  </main>
+</div>
+<div id="scrim" hidden data-act="close"></div>
+<aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="dr-title" hidden></aside>
+<div id="toast" role="status" hidden></div>
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
